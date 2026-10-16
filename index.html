@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CampusBuddy – Free AI Chat</title>
+<style>
+:root{--bg:#f5f6fa;--panel:#fff;--text:#1c2030;--muted:#6b7285;--accent:#4f46e5;--bot:#eceefa;--border:#dfe2ee}
+@media (prefers-color-scheme:dark){:root{--bg:#12141d;--panel:#1b1e2b;--text:#e8eaf3;--muted:#9097ad;--accent:#818cf8;--bot:#262a3b;--border:#2d3247}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif}
+.app{max-width:760px;height:100%;margin:0 auto;display:flex;flex-direction:column;background:var(--panel);border-inline:1px solid var(--border)}
+header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)}
+header h1{font-size:17px;margin:0;flex:1}header small{color:var(--muted);display:block;font-size:12px;font-weight:400}
+select,.ib{background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:7px 10px;font:inherit;font-size:14px}
+#load{padding:12px 16px;border-bottom:1px solid var(--border);font-size:14px}
+.bar{height:8px;background:var(--bot);border-radius:99px;overflow:hidden;margin-top:6px}
+#fill{height:100%;width:0;background:var(--accent);transition:width .2s}
+#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.m{max-width:85%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.u{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.b{align-self:flex-start;background:var(--bot);border-bottom-left-radius:4px}
+form{display:flex;gap:8px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--border)}
+textarea{flex:1;resize:none;max-height:120px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:14px;padding:10px 14px;font:inherit;outline:none}
+#send{background:var(--accent);color:#fff;border:0;border-radius:14px;padding:0 20px;font-weight:600;cursor:pointer}
+#send:disabled,textarea:disabled{opacity:.5}
+</style></head><body>
+<div class="app">
+<header><h1>🎓 CampusBuddy<small>Runs privately in your browser · free &amp; unlimited</small></h1>
+<select id="model"><option value="SmolLM2-360M-Instruct-q4f16_1-MLC">Fast (small)</option><option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" selected>Smarter (1.5B)</option></select>
+<button class="ib" id="clear">New chat</button></header>
+<div id="load"><span id="status">Loading AI engine…</span><div class="bar"><div id="fill"></div></div></div>
+<div id="log"></div>
+<form id="f"><textarea id="in" rows="1" placeholder="Model is loading…" disabled></textarea><button id="send" disabled>Send</button></form>
+</div>
+<script type="module">
+import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+const SYSTEM="You are CampusBuddy, a friendly, concise AI assistant for college students. Help with study tips, explanations, exam planning, coding, careers and campus life. If unsure of a college-specific fact, say so.";
+const $=id=>document.getElementById(id);
+const log=$("log"),inp=$("in"),send=$("send"),status=$("status"),fill=$("fill"),sel=$("model");
+let engine=null,busy=false,history=[];
+function add(role,t){const d=document.createElement("div");d.className="m "+(role==="user"?"u":"b");d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function greet(){log.innerHTML="";add("assistant","Hi! I'm CampusBuddy 👋 I run fully inside your browser, so it's free and private. Ask me anything about studies, coding or careers.")}
+function ready(on){inp.disabled=!on;send.disabled=!on;inp.placeholder=on?"Ask about studies, coding, careers…":"Model is loading…";if(on)inp.focus()}
+async function load(){
+  ready(false);fill.style.width="0";$("load").style.display="block";
+  if(!("gpu" in navigator)){status.textContent="⚠️ Your browser doesn't support WebGPU. Open this page in Chrome, Edge or Brave on a laptop/desktop.";return}
+  try{
+    status.textContent="Downloading model (first time only, then cached)…";
+    engine=await webllm.CreateMLCEngine(sel.value,{initProgressCallback:p=>{fill.style.width=Math.round(p.progress*100)+"%";status.textContent=p.text}});
+    $("load").style.display="none";ready(true);
+  }catch(e){status.textContent="⚠️ Could not load the model: "+(e.message||e)}
+}
+async function ask(){
+  const t=inp.value.trim();if(!t||busy||!engine)return;
+  busy=true;send.disabled=true;inp.value="";inp.style.height="auto";
+  history.push({role:"user",content:t});add("user",t);const bub=add("assistant","…");let out="";
+  try{
+    const chunks=await engine.chat.completions.create({stream:true,temperature:0.7,max_tokens:600,messages:[{role:"system",content:SYSTEM},...history.slice(-12)]});
+    for await(const c of chunks){out+=c.choices[0]?.delta?.content||"";bub.textContent=out;log.scrollTop=log.scrollHeight}
+    history.push({role:"assistant",content:out});
+  }catch(e){history.pop();bub.textContent="⚠️ "+(e.message||"Something went wrong")}
+  busy=false;send.disabled=false;inp.focus();
+}
+$("f").onsubmit=e=>{e.preventDefault();ask()};
+inp.onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();ask()}};
+inp.oninput=()=>{inp.style.height="auto";inp.style.height=Math.min(inp.scrollHeight,120)+"px"};
+$("clear").onclick=()=>{if(!busy){history=[];greet();if(engine)engine.resetChat()}};
+sel.onchange=async()=>{if(busy)return;history=[];greet();if(engine){await engine.unload()}engine=null;load()};
+greet();load();
+</script></body></html>
